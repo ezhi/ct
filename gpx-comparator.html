@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GPX Track Comparator</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --bg: #f8fafc;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --text-secondary: #64748b;
+      --error: #ef4444;
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); }
+    .app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    .header { background: linear-gradient(135deg, var(--primary), #1d4ed8); color: white; padding: 1rem 1.5rem; }
+    .header h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+    .header p { font-size: 0.875rem; opacity: 0.9; }
+    .main { display: flex; flex: 1; overflow: hidden; }
+    .sidebar { width: 340px; min-width: 340px; background: white; border-right: 1px solid var(--border); overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 1rem; }
+    .map-wrapper { flex: 1; }
+    #map { width: 100%; height: 100%; }
+
+    .drop-zone { border: 2px dashed var(--border); border-radius: 8px; padding: 2rem; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--bg); }
+    .drop-zone:hover, .drop-zone.dragover { border-color: var(--primary); background: #eff6ff; }
+    .drop-zone-content { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; color: var(--text-secondary); }
+    .drop-icon { font-size: 2rem; color: var(--primary); }
+
+    .section { background: var(--bg); border-radius: 8px; padding: 1rem; }
+    .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+    .section-header h3 { font-size: 0.875rem; color: var(--text-secondary); }
+    .clear-btn { background: none; border: none; color: var(--error); cursor: pointer; font-size: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 4px; }
+    .clear-btn:hover { background: #fef2f2; }
+
+    .track-list { list-style: none; display: flex; flex-direction: column; gap: 0.5rem; }
+    .track-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem; background: white; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+    .track-color { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+    .track-info { flex: 1; min-width: 0; }
+    .track-name { display: block; font-size: 0.875rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .track-details { display: block; font-size: 0.75rem; color: var(--text-secondary); }
+    .remove-btn { background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 1.25rem; padding: 0.25rem; border-radius: 4px; }
+    .remove-btn:hover { color: var(--error); background: #fef2f2; }
+
+    .controls { display: flex; flex-direction: column; gap: 0.75rem; }
+    .controls-row { display: flex; align-items: center; gap: 0.75rem; }
+    .control-btn { width: 36px; height: 36px; border: none; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; font-size: 1rem; }
+    .play-btn { background: var(--primary); color: white; }
+    .play-btn:hover { background: var(--primary-hover); }
+    .play-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .reset-btn { background: var(--border); color: var(--text); }
+    .reset-btn:hover { background: #cbd5e1; }
+    .time-display { flex: 1; font-size: 0.875rem; font-family: monospace; }
+    .speed-control { display: flex; align-items: center; gap: 0.5rem; }
+    .speed-control label { font-size: 0.75rem; color: var(--text-secondary); }
+    .speed-control select { padding: 0.25rem 0.5rem; border: 1px solid var(--border); border-radius: 4px; font-size: 0.75rem; }
+    .timeline { width: 100%; height: 6px; -webkit-appearance: none; appearance: none; background: var(--border); border-radius: 3px; cursor: pointer; }
+    .timeline::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; background: var(--primary); border-radius: 50%; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+
+    .gap-list { list-style: none; display: flex; flex-direction: column; gap: 0.5rem; }
+    .gap-item { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem; background: white; border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+    .gap-tracks { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; flex: 1; }
+    .color-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .gap-distance { font-size: 0.875rem; font-weight: 600; color: var(--primary); }
+    .empty-msg { text-align: center; font-size: 0.875rem; color: var(--text-secondary); }
+
+    @media (max-width: 768px) {
+      .main { flex-direction: column; }
+      .sidebar { width: 100%; min-width: 100%; max-height: 45vh; border-right: none; border-bottom: 1px solid var(--border); }
+      .map-wrapper { min-height: 55vh; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <h1>GPX Track Comparator</h1>
+      <p>Upload GPX tracks and compare them side by side</p>
+    </header>
+    <div class="main">
+      <aside class="sidebar">
+        <div class="drop-zone" id="dropZone">
+          <input type="file" id="fileInput" accept=".gpx" multiple style="display:none">
+          <div class="drop-zone-content">
+            <span class="drop-icon">+</span>
+            <span>Drop GPX files here or tap to browse</span>
+          </div>
+        </div>
+        <div class="section" id="trackSection" style="display:none">
+          <div class="section-header">
+            <h3>Loaded Tracks (<span id="trackCount">0</span>)</h3>
+            <button class="clear-btn" id="clearAll">Clear All</button>
+          </div>
+          <ul class="track-list" id="trackList"></ul>
+        </div>
+        <div class="section" id="controlsSection" style="display:none">
+          <div class="controls">
+            <div class="controls-row">
+              <button class="control-btn reset-btn" id="resetBtn" title="Reset">&#x21BA;</button>
+              <button class="control-btn play-btn" id="playBtn" title="Play">&#9658;</button>
+              <div class="time-display"><span id="elapsed">0:00</span> / <span id="duration">0:00</span></div>
+              <div class="speed-control">
+                <label>Speed:</label>
+                <select id="speedSelect">
+                  <option value="0.5">0.5x</option>
+                  <option value="1" selected>1x</option>
+                  <option value="2">2x</option>
+                  <option value="5">5x</option>
+                  <option value="10">10x</option>
+                  <option value="20">20x</option>
+                  <option value="50">50x</option>
+                </select>
+              </div>
+            </div>
+            <input type="range" class="timeline" id="timeline" min="0" max="100" step="0.1" value="0">
+          </div>
+        </div>
+        <div class="section" id="gapSection">
+          <div class="section-header"><h3>Current Gaps</h3></div>
+          <p class="empty-msg" id="gapEmpty">Load tracks with timestamps to see gaps</p>
+          <ul class="gap-list" id="gapList"></ul>
+        </div>
+      </aside>
+      <div class="map-wrapper">
+        <div id="map"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const COLORS = ['#3b82f6','#ef4444','#22c55e','#f59e0b','#8b5cf6','#ec4899','#06b6d4','#f97316'];
+    let colorIdx = 0;
+    let tracks = [];
+    let markers = [];
+    let polylines = [];
+    let gapLines = [];
+    let isPlaying = false;
+    let currentTime = 0;
+    let minTime = 0;
+    let maxTime = 0;
+    let speed = 1;
+    let animationId = null;
+    let lastFrameTime = 0;
+
+    const map = L.map('map').setView([51.505, -0.09], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const trackSection = document.getElementById('trackSection');
+    const trackList = document.getElementById('trackList');
+    const trackCount = document.getElementById('trackCount');
+    const controlsSection = document.getElementById('controlsSection');
+    const playBtn = document.getElementById('playBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const timeline = document.getElementById('timeline');
+    const elapsedEl = document.getElementById('elapsed');
+    const durationEl = document.getElementById('duration');
+    const speedSelect = document.getElementById('speedSelect');
+    const gapList = document.getElementById('gapList');
+    const gapEmpty = document.getElementById('gapEmpty');
+    const clearAllBtn = document.getElementById('clearAll');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+    fileInput.addEventListener('change', e => { handleFiles(e.target.files); e.target.value = ''; });
+    clearAllBtn.addEventListener('click', clearAll);
+    playBtn.addEventListener('click', togglePlay);
+    resetBtn.addEventListener('click', reset);
+    timeline.addEventListener('input', seek);
+    speedSelect.addEventListener('change', e => { speed = parseFloat(e.target.value); });
+
+    function handleFiles(files) {
+      Array.from(files).forEach(file => {
+        if (!file.name.toLowerCase().endsWith('.gpx')) return;
+        const reader = new FileReader();
+        reader.onload = e => {
+          try {
+            const track = parseGPX(e.target.result, file.name);
+            tracks.push(track);
+            renderTrack(track);
+            updateUI();
+          } catch (err) { alert('Error parsing ' + file.name + ': ' + err.message); }
+        };
+        reader.readAsText(file);
+      });
+    }
+
+    function parseGPX(text, filename) {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(text, 'application/xml');
+      const points = [];
+      doc.querySelectorAll('trkpt, rtept, wpt').forEach(pt => {
+        const lat = parseFloat(pt.getAttribute('lat'));
+        const lon = parseFloat(pt.getAttribute('lon'));
+        const eleNode = pt.querySelector('ele');
+        const timeNode = pt.querySelector('time');
+        const point = { lat, lon };
+        if (eleNode) point.ele = parseFloat(eleNode.textContent);
+        if (timeNode) point.time = new Date(timeNode.textContent);
+        points.push(point);
+      });
+      if (points.length === 0) throw new Error('No track points found');
+      const nameNode = doc.querySelector('trk > name, rte > name, metadata > name');
+      const name = nameNode ? nameNode.textContent : filename.replace(/\.gpx$/i, '');
+      const color = COLORS[colorIdx++ % COLORS.length];
+      const pointsWithTime = points.filter(p => p.time);
+      const startTime = pointsWithTime.length ? Math.min(...pointsWithTime.map(p => p.time.getTime())) : null;
+      const endTime = pointsWithTime.length ? Math.max(...pointsWithTime.map(p => p.time.getTime())) : null;
+      let distance = 0;
+      for (let i = 1; i < points.length; i++) distance += haversine(points[i-1], points[i]);
+      return { id: Date.now() + Math.random(), name, color, points, startTime, endTime, distance };
+    }
+
+    function haversine(p1, p2) {
+      const R = 6371000;
+      const φ1 = p1.lat * Math.PI / 180, φ2 = p2.lat * Math.PI / 180;
+      const Δφ = (p2.lat - p1.lat) * Math.PI / 180;
+      const Δλ = (p2.lon - p1.lon) * Math.PI / 180;
+      const a = Math.sin(Δφ/2)**2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    function renderTrack(track) {
+      const latlngs = track.points.map(p => [p.lat, p.lon]);
+      const polyline = L.polyline(latlngs, { color: track.color, weight: 4, opacity: 0.8 }).addTo(map);
+      polylines.push({ id: track.id, polyline });
+      const icon = L.divIcon({
+        className: 'custom-marker',
+        html: `<div style="width:16px;height:16px;background:${track.color};border:3px solid white;border-radius:50%;box-shadow:0 2px 4px rgba(0,0,0,0.3);"></div>`,
+        iconSize: [16, 16], iconAnchor: [8, 8]
+      });
+      const marker = L.marker(latlngs[0], { icon }).addTo(map);
+      markers.push({ id: track.id, marker, color: track.color, name: track.name });
+      fitBounds();
+    }
+
+    function fitBounds() {
+      if (tracks.length === 0) return;
+      const allPoints = tracks.flatMap(t => t.points.map(p => [p.lat, p.lon]));
+      map.fitBounds(allPoints, { padding: [50, 50] });
+    }
+
+    function updateUI() {
+      trackCount.textContent = tracks.length;
+      trackSection.style.display = tracks.length ? 'block' : 'none';
+      trackList.innerHTML = tracks.map(t => `
+        <li class="track-item">
+          <div class="track-color" style="background:${t.color}"></div>
+          <div class="track-info">
+            <span class="track-name">${t.name}</span>
+            <span class="track-details">${formatDist(t.distance)}${t.startTime && t.endTime ? ' · ' + formatTime(t.endTime - t.startTime) : ''}</span>
+          </div>
+          <button class="remove-btn" onclick="removeTrack('${t.id}')">&times;</button>
+        </li>
+      `).join('');
+
+      const tracksWithTime = tracks.filter(t => t.startTime && t.endTime);
+      if (tracksWithTime.length) {
+        minTime = Math.min(...tracksWithTime.map(t => t.startTime));
+        maxTime = Math.max(...tracksWithTime.map(t => t.endTime));
+        currentTime = minTime;
+        controlsSection.style.display = 'block';
+        durationEl.textContent = formatTime(maxTime - minTime);
+        elapsedEl.textContent = '0:00';
+        timeline.value = 0;
+        updatePositions();
+      } else {
+        controlsSection.style.display = 'none';
+      }
+    }
+
+    function removeTrack(id) {
+      tracks = tracks.filter(t => t.id != id);
+      const pl = polylines.find(p => p.id == id);
+      if (pl) { map.removeLayer(pl.polyline); polylines = polylines.filter(p => p.id != id); }
+      const mk = markers.find(m => m.id == id);
+      if (mk) { map.removeLayer(mk.marker); markers = markers.filter(m => m.id != id); }
+      updateUI();
+      if (tracks.length) fitBounds();
+    }
+
+    function clearAll() {
+      tracks = [];
+      polylines.forEach(p => map.removeLayer(p.polyline));
+      markers.forEach(m => map.removeLayer(m.marker));
+      gapLines.forEach(l => map.removeLayer(l));
+      polylines = []; markers = []; gapLines = [];
+      colorIdx = 0;
+      isPlaying = false;
+      if (animationId) cancelAnimationFrame(animationId);
+      updateUI();
+      playBtn.innerHTML = '&#9658;';
+      gapList.innerHTML = '';
+      gapEmpty.style.display = 'block';
+    }
+
+    function togglePlay() {
+      if (maxTime <= minTime) return;
+      isPlaying = !isPlaying;
+      playBtn.innerHTML = isPlaying ? '&#10074;&#10074;' : '&#9658;';
+      if (isPlaying) {
+        if (currentTime >= maxTime) currentTime = minTime;
+        lastFrameTime = 0;
+        animationId = requestAnimationFrame(animate);
+      } else if (animationId) {
+        cancelAnimationFrame(animationId);
+      }
+    }
+
+    function animate(timestamp) {
+      if (!isPlaying) return;
+      if (lastFrameTime === 0) lastFrameTime = timestamp;
+      const delta = timestamp - lastFrameTime;
+      lastFrameTime = timestamp;
+      currentTime += delta * speed;
+      if (currentTime >= maxTime) {
+        currentTime = maxTime;
+        isPlaying = false;
+        playBtn.innerHTML = '&#9658;';
+      }
+      updatePositions();
+      if (isPlaying) animationId = requestAnimationFrame(animate);
+    }
+
+    function reset() {
+      isPlaying = false;
+      if (animationId) cancelAnimationFrame(animationId);
+      playBtn.innerHTML = '&#9658;';
+      currentTime = minTime;
+      updatePositions();
+    }
+
+    function seek() {
+      const pct = parseFloat(timeline.value);
+      currentTime = minTime + (pct / 100) * (maxTime - minTime);
+      updatePositions();
+    }
+
+    function updatePositions() {
+      const elapsed = currentTime - minTime;
+      const duration = maxTime - minTime;
+      elapsedEl.textContent = formatTime(elapsed);
+      timeline.value = duration > 0 ? (elapsed / duration) * 100 : 0;
+
+      const positions = [];
+      tracks.forEach(track => {
+        const pts = track.points.filter(p => p.time);
+        if (pts.length === 0) return;
+        let pos = null;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const t1 = pts[i].time.getTime(), t2 = pts[i+1].time.getTime();
+          if (currentTime >= t1 && currentTime <= t2) {
+            const ratio = (currentTime - t1) / (t2 - t1);
+            pos = {
+              lat: pts[i].lat + (pts[i+1].lat - pts[i].lat) * ratio,
+              lon: pts[i].lon + (pts[i+1].lon - pts[i].lon) * ratio
+            };
+            break;
+          }
+        }
+        if (!pos && currentTime < pts[0].time.getTime()) pos = pts[0];
+        if (!pos) pos = pts[pts.length - 1];
+        const mk = markers.find(m => m.id === track.id);
+        if (mk && pos) {
+          mk.marker.setLatLng([pos.lat, pos.lon]);
+          positions.push({ id: track.id, pos, color: mk.color, name: mk.name });
+        }
+      });
+
+      gapLines.forEach(l => map.removeLayer(l));
+      gapLines = [];
+      const gaps = [];
+      for (let i = 0; i < positions.length - 1; i++) {
+        for (let j = i + 1; j < positions.length; j++) {
+          const p1 = positions[i], p2 = positions[j];
+          const dist = haversine(p1.pos, p2.pos);
+          gaps.push({ p1, p2, dist });
+          const line = L.polyline([[p1.pos.lat, p1.pos.lon], [p2.pos.lat, p2.pos.lon]], {
+            color: '#666', weight: 2, dashArray: '5, 10', opacity: 0.7
+          }).addTo(map);
+          gapLines.push(line);
+        }
+      }
+      gaps.sort((a, b) => a.dist - b.dist);
+      if (gaps.length) {
+        gapEmpty.style.display = 'none';
+        gapList.innerHTML = gaps.map(g => `
+          <li class="gap-item">
+            <div class="gap-tracks">
+              <span class="color-dot" style="background:${g.p1.color}"></span>${g.p1.name}
+              <span style="color:var(--text-secondary)">&harr;</span>
+              <span class="color-dot" style="background:${g.p2.color}"></span>${g.p2.name}
+            </div>
+            <div class="gap-distance">${formatDist(g.dist)}</div>
+          </li>
+        `).join('');
+      } else {
+        gapEmpty.style.display = 'block';
+        gapList.innerHTML = '';
+      }
+    }
+
+    function formatTime(ms) {
+      const s = Math.floor(ms / 1000);
+      const m = Math.floor(s / 60);
+      const h = Math.floor(m / 60);
+      if (h > 0) return `${h}:${String(m % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+      return `${m}:${String(s % 60).padStart(2, '0')}`;
+    }
+
+    function formatDist(m) {
+      return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`;
+    }
+  </script>
+</body>
+</html>
